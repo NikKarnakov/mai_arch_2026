@@ -5,5 +5,6 @@ labs
 
 ## Документирование архитектуры в Structurizr
 
-[readme.md](lab1/README.md)/n
+[readme.md](lab1/README.md)  
+
 [workspace.dsl](lab1/arch_lab_1.dsl)
