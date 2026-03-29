@@ -13,6 +13,6 @@ labs
 
 ## Разработка REST API сервиса
 
-[readme.md](lab2/README.md)  
+[readme.md](lab2/hotel-booking-api/README.md)  
 
 
