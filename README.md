@@ -15,4 +15,5 @@ labs
 
 [readme.md](lab2/hotel-booking-api/README.md)  
 
+[Результат](lab2/hotel-booking-api)
 
