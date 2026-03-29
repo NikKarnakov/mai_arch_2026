@@ -1,0 +1,138 @@
+openapi: 3.0.0
+info:
+  title: Hotel Booking API
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+paths:
+  /auth/register:
+    post:
+      summary: Регистрация нового пользователя
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRegisterDTO'
+      responses:
+        '201':
+          description: Пользователь создан
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+        '400':
+          description: Ошибка данных
+  /auth/login:
+    post:
+      summary: Вход пользователя
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserLoginDTO'
+      responses:
+        '200':
+          description: Успешная авторизация
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+        '401':
+          description: Неверные данные
+  /hotels:
+    post:
+      summary: Создание нового отеля
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HotelDTO'
+      responses:
+        '201':
+          description: Отель создан
+    get:
+      summary: Получение списка отелей
+      responses:
+        '200':
+          description: Список отелей
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HotelDTO'
+  /bookings:
+    post:
+      summary: Создание бронирования
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingDTO'
+      responses:
+        '201':
+          description: Бронирование создано
+    delete:
+      summary: Отмена бронирования
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                booking_id:
+                  type: integer
+      responses:
+        '200':
+          description: Бронирование отменено
+        '404':
+          description: Бронирование не найдено
+components:
+  schemas:
+    UserRegisterDTO:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        login:
+          type: string
+        email:
+          type: string
+        password:
+          type: string
+      required: [firstName, lastName, login, email, password]
+    UserLoginDTO:
+      type: object
+      properties:
+        login:
+          type: string
+        password:
+          type: string
+      required: [login, password]
+    HotelDTO:
+      type: object
+      properties:
+        name:
+          type: string
+        city:
+          type: string
+      required: [name, city]
+    BookingDTO:
+      type: object
+      properties:
+        hotelId:
+          type: integer
+      required: [hotelId]
