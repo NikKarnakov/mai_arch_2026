@@ -24,3 +24,11 @@ labs
 [readme.md](lab3/README.md)  
 
 [Результат](lab3)
+
+# Лабораторная работа №4
+
+## Проектирование и работа с MongoDB
+
+[readme.md](lab4/README.md)  
+
+[Результат](lab4)
