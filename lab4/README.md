@@ -4,7 +4,7 @@
 
 ## Что есть в проекте
 
-- PostgreSQL-схема: `schema.sql`, `data.sql`, `queries.sql`, `optimization.md`;
+- PostgreSQL-схема: `schema.sql`, `data.sql`, `queries.sql`;
 - MongoDB-документы: `schema_design.md`, `data.js`, `queries.js`, `validation.js`, `aggregation.js`;
 - API на userver для PostgreSQL: пользователи, отели, номера, бронирования, отзывы;
 - API на userver для MongoDB: `/mongo/bookings`, `/mongo/reviews`;
