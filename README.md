@@ -32,3 +32,11 @@ labs
 [readme.md](lab4/README.md)  
 
 [Результат](lab4)
+
+# Лабораторная работа №5
+
+## Оптимизация производительности через кеширование и rate limiting
+
+[readme.md](lab5/README.md)  
+
+[Результат](lab5)
