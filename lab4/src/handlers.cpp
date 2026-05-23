@@ -1,84 +1,332 @@
 #include "handlers.hpp"
 
-#include <userver/server/http/http_method.hpp>
+#include "auth.hpp"
+
+#include <stdexcept>
+
+#include <userver/formats/json/value_builder.hpp>
 #include <userver/server/http/http_status.hpp>
 
 namespace hotel {
 
-BaseMongoHandler::BaseMongoHandler(const userver::components::ComponentConfig& config,
-                                   const userver::components::ComponentContext& context)
-    : HttpHandlerJsonBase(config, context),
-      storage_(context.FindComponent<MongoStorage>()) {}
+namespace {
 
-const MongoStorage& BaseMongoHandler::Storage() const {
+std::string GetString(const userver::formats::json::Value& body, std::string_view name) {
+    if (!body.HasMember(std::string{name})) {
+        throw std::runtime_error("Missing field: " + std::string{name});
+    }
+    return body[std::string{name}].As<std::string>();
+}
+
+int GetInt(const userver::formats::json::Value& body, std::string_view name, int fallback = 0) {
+    if (!body.HasMember(std::string{name})) {
+        return fallback;
+    }
+    return body[std::string{name}].As<int>();
+}
+
+long GetLong(const userver::formats::json::Value& body, std::string_view name) {
+    if (!body.HasMember(std::string{name})) {
+        throw std::runtime_error("Missing field: " + std::string{name});
+    }
+    return body[std::string{name}].As<long>();
+}
+
+void PutRoom(userver::formats::json::ValueBuilder& item, const RoomRow& room) {
+    item["id"] = room.id;
+    item["hotelId"] = room.hotel_id;
+    item["roomNumber"] = room.room_number;
+    item["roomType"] = room.room_type;
+    item["capacity"] = room.capacity;
+    item["pricePerNight"] = room.price_per_night;
+    item["isAvailable"] = room.is_available;
+}
+
+long RequireUserId(const userver::server::http::HttpRequest& request) {
+    const auto user_id = auth::ExtractUserId(request.GetHeader("Authorization"));
+    if (!user_id) {
+        throw std::runtime_error("Unauthorized");
+    }
+    return *user_id;
+}
+
+}  
+
+BaseJsonHandler::BaseJsonHandler(const userver::components::ComponentConfig& config,
+                                 const userver::components::ComponentContext& context)
+    : HttpHandlerJsonBase(config, context),
+      storage_(context.FindComponent<Storage>()) {}
+
+const Storage& BaseJsonHandler::StorageRef() const {
     return storage_;
 }
 
-userver::formats::json::Value MongoBookingsHandler::HandleRequestJsonThrow(
+userver::formats::json::Value RegisterHandler::HandleRequestJsonThrow(
+    const userver::server::http::HttpRequest& request,
+    const userver::formats::json::Value& body,
+    userver::server::request::RequestContext&) const {
+    auto& response = request.GetHttpResponse();
+
+    const auto id = StorageRef().CreateUser(
+        GetString(body, "firstName"),
+        GetString(body, "lastName"),
+        GetString(body, "login"),
+        GetString(body, "email"),
+        auth::HashPassword(GetString(body, "password")));
+
+    response.SetStatus(userver::server::http::HttpStatus::kCreated);
+
+    userver::formats::json::ValueBuilder result;
+    result["id"] = id;
+    return result.ExtractValue();
+}
+
+userver::formats::json::Value LoginHandler::HandleRequestJsonThrow(
+    const userver::server::http::HttpRequest& request,
+    const userver::formats::json::Value& body,
+    userver::server::request::RequestContext&) const {
+    const auto login = GetString(body, "login");
+    const auto password = GetString(body, "password");
+
+    const auto user = StorageRef().GetUserByLogin(login);
+    if (!user || !auth::CheckPassword(password, user->password_hash)) {
+        request.GetHttpResponse().SetStatus(userver::server::http::HttpStatus::kUnauthorized);
+        userver::formats::json::ValueBuilder err;
+        err["error"] = "Invalid credentials";
+        return err.ExtractValue();
+    }
+
+    userver::formats::json::ValueBuilder result;
+    result["token"] = auth::MakeToken(user->id, user->login);
+    result["userId"] = user->id;
+    return result.ExtractValue();
+}
+
+userver::formats::json::Value UsersHandler::HandleRequestJsonThrow(
+    const userver::server::http::HttpRequest& request,
+    const userver::formats::json::Value&,
+    userver::server::request::RequestContext&) const {
+    const auto login = request.GetArg("login");
+
+    userver::formats::json::ValueBuilder result;
+
+    if (!login.empty()) {
+        const auto user = StorageRef().GetUserByLogin(login);
+        if (!user) {
+            request.GetHttpResponse().SetStatus(userver::server::http::HttpStatus::kNotFound);
+            result["error"] = "User not found";
+            return result.ExtractValue();
+        }
+
+        result["id"] = user->id;
+        result["firstName"] = user->first_name;
+        result["lastName"] = user->last_name;
+        result["login"] = user->login;
+        result["email"] = user->email;
+        return result.ExtractValue();
+    }
+
+    const auto mask = request.GetArg("mask");
+    if (mask.empty()) {
+        request.GetHttpResponse().SetStatus(userver::server::http::HttpStatus::kBadRequest);
+        result["error"] = "Use login or mask query parameter";
+        return result.ExtractValue();
+    }
+
+    const auto users = StorageRef().SearchUsersByNameMask(mask);
+    auto arr = userver::formats::json::ValueBuilder(userver::formats::json::Type::kArray);
+
+    for (const auto& user : users) {
+        userver::formats::json::ValueBuilder item;
+        item["id"] = user.id;
+        item["firstName"] = user.first_name;
+        item["lastName"] = user.last_name;
+        item["login"] = user.login;
+        item["email"] = user.email;
+        arr.PushBack(item.ExtractValue());
+    }
+
+    result["users"] = arr.ExtractValue();
+    return result.ExtractValue();
+}
+
+userver::formats::json::Value HotelsHandler::HandleRequestJsonThrow(
     const userver::server::http::HttpRequest& request,
     const userver::formats::json::Value& body,
     userver::server::request::RequestContext&) const {
     const auto method = request.GetMethod();
 
     if (method == userver::server::http::HttpMethod::kPost) {
+        const auto id = StorageRef().CreateHotel(
+            GetString(body, "name"),
+            GetString(body, "city"),
+            GetString(body, "address"),
+            GetInt(body, "stars", 3),
+            body.HasMember("description") ? body["description"].As<std::string>() : "");
+
         request.GetHttpResponse().SetStatus(userver::server::http::HttpStatus::kCreated);
-        return Storage().CreateBooking(body);
+
+        userver::formats::json::ValueBuilder result;
+        result["hotelId"] = id;
+        return result.ExtractValue();
+    }
+
+    const auto city = request.GetArg("city");
+    const auto stars_arg = request.GetArg("minStars");
+    const auto min_stars = stars_arg.empty() ? 1 : std::stoi(stars_arg);
+
+    const auto hotels = StorageRef().SearchHotels(city, min_stars);
+
+    userver::formats::json::ValueBuilder result;
+    auto arr = userver::formats::json::ValueBuilder(userver::formats::json::Type::kArray);
+
+    for (const auto& hotel : hotels) {
+        userver::formats::json::ValueBuilder item;
+        item["id"] = hotel.id;
+        item["name"] = hotel.name;
+        item["city"] = hotel.city;
+        item["address"] = hotel.address;
+        item["stars"] = hotel.stars;
+        item["description"] = hotel.description;
+        arr.PushBack(item.ExtractValue());
+    }
+
+    result["hotels"] = arr.ExtractValue();
+    return result.ExtractValue();
+}
+
+userver::formats::json::Value RoomsHandler::HandleRequestJsonThrow(
+    const userver::server::http::HttpRequest& request,
+    const userver::formats::json::Value&,
+    userver::server::request::RequestContext&) const {
+    const auto hotel_id_arg = request.GetArg("hotelId");
+    if (hotel_id_arg.empty()) {
+        throw std::runtime_error("hotelId query parameter is required");
+    }
+
+    const auto hotel_id = std::stol(hotel_id_arg);
+    const auto room_type = request.GetArg("roomType");
+    const auto check_in = request.GetArg("checkIn");
+    const auto check_out = request.GetArg("checkOut");
+    const auto guests_arg = request.GetArg("guests");
+    const auto guests = guests_arg.empty() ? 1 : std::stoi(guests_arg);
+
+    std::vector<RoomRow> rooms;
+    if (!check_in.empty() && !check_out.empty()) {
+        rooms = StorageRef().FindAvailableRooms(hotel_id, room_type, guests, check_in, check_out);
+    } else {
+        rooms = StorageRef().ListRooms(hotel_id);
+    }
+
+    userver::formats::json::ValueBuilder result;
+    auto arr = userver::formats::json::ValueBuilder(userver::formats::json::Type::kArray);
+
+    for (const auto& room : rooms) {
+        userver::formats::json::ValueBuilder item;
+        PutRoom(item, room);
+        arr.PushBack(item.ExtractValue());
+    }
+
+    result["rooms"] = arr.ExtractValue();
+    return result.ExtractValue();
+}
+
+userver::formats::json::Value BookingsHandler::HandleRequestJsonThrow(
+    const userver::server::http::HttpRequest& request,
+    const userver::formats::json::Value& body,
+    userver::server::request::RequestContext&) const {
+    long user_id = 0;
+
+    try {
+        user_id = RequireUserId(request);
+    } catch (const std::exception&) {
+        request.GetHttpResponse().SetStatus(userver::server::http::HttpStatus::kUnauthorized);
+        userver::formats::json::ValueBuilder err;
+        err["error"] = "Unauthorized";
+        return err.ExtractValue();
+    }
+
+    const auto method = request.GetMethod();
+
+    if (method == userver::server::http::HttpMethod::kPost) {
+        const auto id = StorageRef().CreateBooking(
+            user_id,
+            GetLong(body, "roomId"),
+            GetString(body, "checkIn"),
+            GetString(body, "checkOut"),
+            GetInt(body, "guestsCount", 1));
+
+        request.GetHttpResponse().SetStatus(userver::server::http::HttpStatus::kCreated);
+
+        userver::formats::json::ValueBuilder result;
+        result["bookingId"] = id;
+        return result.ExtractValue();
     }
 
     if (method == userver::server::http::HttpMethod::kDelete) {
-        const auto ok = Storage().CancelBooking(
-            body["bookingId"].As<std::string>(),
-            body["userId"].As<std::string>()
-        );
-
+        const auto ok = StorageRef().CancelBooking(GetLong(body, "bookingId"), user_id);
         request.GetHttpResponse().SetStatus(
             ok ? userver::server::http::HttpStatus::kOk
-               : userver::server::http::HttpStatus::kNotFound
-        );
+               : userver::server::http::HttpStatus::kNotFound);
 
         userver::formats::json::ValueBuilder result;
         result["status"] = ok ? "cancelled" : "not_found";
         return result.ExtractValue();
     }
 
-    const auto booking_id = request.GetArg("bookingId");
-    if (!booking_id.empty()) {
-        return Storage().GetBooking(booking_id);
-    }
-
-    const auto user_id = request.GetArg("userId");
-    if (!user_id.empty()) {
-        return Storage().ListBookingsByUser(user_id);
-    }
-
-    request.GetHttpResponse().SetStatus(userver::server::http::HttpStatus::kBadRequest);
-
+    const auto bookings = StorageRef().ListUserBookings(user_id);
     userver::formats::json::ValueBuilder result;
-    result["error"] = "bookingId or userId query parameter is required";
+    auto arr = userver::formats::json::ValueBuilder(userver::formats::json::Type::kArray);
+
+    for (const auto& booking : bookings) {
+        userver::formats::json::ValueBuilder item;
+        item["id"] = booking.id;
+        item["userId"] = booking.user_id;
+        item["roomId"] = booking.room_id;
+        item["checkIn"] = booking.check_in;
+        item["checkOut"] = booking.check_out;
+        item["guestsCount"] = booking.guests_count;
+        item["status"] = booking.status;
+        item["totalPrice"] = booking.total_price;
+        arr.PushBack(item.ExtractValue());
+    }
+
+    result["bookings"] = arr.ExtractValue();
     return result.ExtractValue();
 }
 
-userver::formats::json::Value MongoReviewsHandler::HandleRequestJsonThrow(
+userver::formats::json::Value ReviewsHandler::HandleRequestJsonThrow(
     const userver::server::http::HttpRequest& request,
     const userver::formats::json::Value& body,
     userver::server::request::RequestContext&) const {
-    const auto method = request.GetMethod();
+    long user_id = 0;
 
-    if (method == userver::server::http::HttpMethod::kPost) {
-        request.GetHttpResponse().SetStatus(userver::server::http::HttpStatus::kCreated);
-        return Storage().CreateReview(body);
+    try {
+        user_id = RequireUserId(request);
+    } catch (const std::exception&) {
+        request.GetHttpResponse().SetStatus(userver::server::http::HttpStatus::kUnauthorized);
+        userver::formats::json::ValueBuilder err;
+        err["error"] = "Unauthorized";
+        return err.ExtractValue();
     }
 
-    const auto hotel_id = request.GetArg("hotelId");
-    if (hotel_id.empty()) {
-        request.GetHttpResponse().SetStatus(userver::server::http::HttpStatus::kBadRequest);
-
-        userver::formats::json::ValueBuilder result;
-        result["error"] = "hotelId query parameter is required";
-        return result.ExtractValue();
+    std::optional<long> booking_id;
+    if (body.HasMember("bookingId") && !body["bookingId"].IsNull()) {
+        booking_id = body["bookingId"].As<long>();
     }
 
-    return Storage().ListReviewsByHotel(hotel_id);
+    const auto id = StorageRef().CreateReview(
+        user_id,
+        GetLong(body, "hotelId"),
+        booking_id,
+        GetInt(body, "rating", 5),
+        body.HasMember("comment") ? body["comment"].As<std::string>() : "");
+
+    request.GetHttpResponse().SetStatus(userver::server::http::HttpStatus::kCreated);
+
+    userver::formats::json::ValueBuilder result;
+    result["reviewId"] = id;
+    return result.ExtractValue();
 }
 
-}  // namespace hotel
+} 
