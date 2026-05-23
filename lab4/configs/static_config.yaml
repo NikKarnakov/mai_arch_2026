@@ -22,7 +22,8 @@ components_manager:
           overflow_behavior: discard
 
     dynamic-config:
-      defaults: {}
+      defaults:
+        POSTGRES_CONNECTION_POOL_SIZE: 10
 
     testsuite-support: {}
 
@@ -31,10 +32,51 @@ components_manager:
       method: GET
       task_processor: main-task-processor
 
+    hotel-booking-db:
+      dbconnection: $dbconnection
+      blocking_task_processor: fs-task-processor
+      dns_resolver: async
+
     mongo-hotel-booking:
       dbconnection: $mongo_uri
 
+    storage: {}
     mongo-storage: {}
+
+    handler-register:
+      path: /auth/register
+      method: POST
+      task_processor: main-task-processor
+
+    handler-login:
+      path: /auth/login
+      method: POST
+      task_processor: main-task-processor
+
+    handler-users:
+      path: /users
+      method: GET
+      task_processor: main-task-processor
+
+    handler-hotels:
+      path: /hotels
+      method: GET,POST
+      task_processor: main-task-processor
+
+    handler-rooms:
+      path: /rooms
+      method: GET
+      task_processor: main-task-processor
+
+    handler-bookings:
+      path: /bookings
+      method: GET,POST,DELETE
+      task_processor: main-task-processor
+
+    handler-reviews:
+      path: /reviews
+      method: POST
+      task_processor: main-task-processor
 
     handler-mongo-bookings:
       path: /mongo/bookings
