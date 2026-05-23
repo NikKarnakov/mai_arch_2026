@@ -1,0 +1,47 @@
+components_manager:
+  task_processors:
+    main-task-processor:
+      worker_threads: 4
+    fs-task-processor:
+      worker_threads: 2
+
+  default_task_processor: main-task-processor
+
+  components:
+    server:
+      listener:
+        port: 8080
+        task_processor: main-task-processor
+
+    logging:
+      fs-task-processor: fs-task-processor
+      loggers:
+        default:
+          file_path: '@stderr'
+          level: info
+          overflow_behavior: discard
+
+    dynamic-config:
+      defaults: {}
+
+    testsuite-support: {}
+
+    handler-ping:
+      path: /ping
+      method: GET
+      task_processor: main-task-processor
+
+    mongo-hotel-booking:
+      dbconnection: $mongo_uri
+
+    mongo-storage: {}
+
+    handler-mongo-bookings:
+      path: /mongo/bookings
+      method: GET,POST,DELETE
+      task_processor: main-task-processor
+
+    handler-mongo-reviews:
+      path: /mongo/reviews
+      method: GET,POST
+      task_processor: main-task-processor
