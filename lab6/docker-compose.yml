@@ -1,0 +1,112 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: hotel-booking-postgres
+    environment:
+      POSTGRES_DB: hotel_booking
+      POSTGRES_USER: hotel_user
+      POSTGRES_PASSWORD: hotel_password
+    ports:
+    - 5432:5432
+    volumes:
+    - hotel_booking_pgdata:/var/lib/postgresql/data
+    - ./db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    - ./db/data.sql:/docker-entrypoint-initdb.d/02_data.sql:ro
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U hotel_user -d hotel_booking
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  mongodb:
+    image: mongo:7
+    container_name: hotel-booking-mongodb
+    restart: unless-stopped
+    ports:
+    - 27017:27017
+    environment:
+      MONGO_INITDB_DATABASE: hotel_booking_docs
+    volumes:
+    - mongo_data:/data/db
+    - ./mongo-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+      - CMD
+      - mongosh
+      - --quiet
+      - --eval
+      - db.adminCommand('ping').ok
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  api:
+    build: .
+    container_name: hotel-booking-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    ports:
+    - 8080:8080
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: hotel-booking-rabbitmq
+    restart: unless-stopped
+    ports:
+    - 5672:5672
+    - 15672:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test:
+      - CMD
+      - rabbitmq-diagnostics
+      - -q
+      - ping
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  event-consumer:
+    image: python:3.12-alpine
+    container_name: hotel-booking-event-consumer
+    working_dir: /app
+    volumes:
+    - ./event-service:/app:ro
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: '5672'
+      RABBITMQ_USER: guest
+      RABBITMQ_PASSWORD: guest
+      EVENT_EXCHANGE: hotel.events
+      NOTIFICATIONS_QUEUE: hotel.notifications
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && python consumer.py"
+  event-producer:
+    image: python:3.12-alpine
+    container_name: hotel-booking-event-producer
+    profiles:
+    - events
+    working_dir: /app
+    volumes:
+    - ./event-service:/app:ro
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: '5672'
+      RABBITMQ_USER: guest
+      RABBITMQ_PASSWORD: guest
+      EVENT_EXCHANGE: hotel.events
+      EVENT_TYPE: BookingCreated
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && python producer.py"
+volumes:
+  hotel_booking_pgdata: null
+  mongo_data: null
