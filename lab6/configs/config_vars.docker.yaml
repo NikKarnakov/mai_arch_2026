@@ -1,0 +1,2 @@
+dbconnection: 'postgresql://hotel_user:hotel_password@postgres:5432/hotel_booking'
+mongo_uri: 'mongodb://mongodb:27017/hotel_booking_docs'
