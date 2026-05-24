@@ -375,20 +375,6 @@ docker compose run --rm \
 docker compose logs -f event-consumer
 ```
 
-Ожидаемый результат для `BookingCreated`:
-
-```text
-Received BookingCreated event_id=...
-Notification prepared: booking 501 created for user 101
-```
-
-Ожидаемый результат для `BookingCancelled`:
-
-```text
-Received BookingCancelled event_id=...
-Notification prepared: booking 501 cancelled for user 101
-```
-
 ## Проверка очереди RabbitMQ
 
 После запуска можно проверить queue в RabbitMQ UI:
@@ -403,19 +389,187 @@ Exchange:
 Exchanges -> hotel.events
 ```
 
-## Итог
+## Пример запуска и тестирования Event-Driven архитектуры
 
-В рамках шестой лабораторной работы реализовано:
+### 1. Запуск проекта
+
+Команда:
+
+```bash
+docker compose up --build
+```
+
+Результат:
 
 ```text
-анализ событий
-Event-Driven дизайн
-выбор RabbitMQ
-topic exchange и routing keys
-описание delivery guarantees
-CQRS-дизайн
-producer
-consumer
-event catalog
-инструкции запуска и проверки
+[+] Building 42.3s
+[+] Running 6/6
+
+✔ Network hotel_booking_default              Created
+✔ Volume hotel_booking_pgdata                Created
+✔ Volume mongo_data                          Created
+✔ Container hotel-booking-postgres           Healthy
+✔ Container hotel-booking-mongodb            Healthy
+✔ Container hotel-booking-rabbitmq           Healthy
+✔ Container hotel-booking-api                Started
+✔ Container hotel-booking-event-consumer     Started
 ```
+
+---
+
+### 2. Проверка доступности API
+
+Команда:
+
+```bash
+curl http://localhost:8080/ping
+```
+
+Результат:
+
+```text
+OK
+```
+
+Это подтверждает успешный запуск REST API.
+
+---
+
+### 3. Проверка RabbitMQ
+
+Открыть в браузере:
+
+```text
+http://localhost:15672
+```
+
+Авторизация:
+
+```text
+login: guest
+password: guest
+```
+
+После входа доступны:
+
+```text
+Exchanges → hotel.events
+Queues and Streams → hotel.notifications
+```
+
+---
+
+### 4. Отправка события создания бронирования (BookingCreated)
+
+Команда:
+
+```bash
+docker compose run --rm event-producer
+```
+
+Результат:
+
+```text
+Published BookingCreated with routing_key=booking.created
+
+{
+  "eventId": "evt-6b0d6df9-7f4e-4b67-a4f8-9e8f1f4b4d83",
+  "eventType": "BookingCreated",
+  "eventVersion": 1,
+  "occurredAt": "2026-05-24T12:00:00Z",
+  "producer": "hotel-booking-event-producer",
+  "correlationId": "req-91fd0d2f",
+  "payload": {
+    "bookingId": 501,
+    "userId": 101,
+    "roomId": 7,
+    "checkIn": "2026-06-10",
+    "checkOut": "2026-06-12",
+    "guestsCount": 2,
+    "status": "created"
+  }
+}
+```
+
+---
+
+### 5. Проверка обработки события consumer
+
+Команда:
+
+```bash
+docker compose logs -f event-consumer
+```
+
+Результат:
+
+```text
+hotel-booking-event-consumer  | Notification consumer started. queue=hotel.notifications
+
+hotel-booking-event-consumer  | Received BookingCreated event_id=evt-6b0d6df9-7f4e-4b67-a4f8-9e8f1f4b4d83
+
+hotel-booking-event-consumer  | Notification prepared: booking 501 created for user 101
+```
+
+Это подтверждает:
+
+```text
+producer успешно отправил событие
+RabbitMQ доставил сообщение
+consumer получил сообщение
+consumer выполнил обработку
+```
+
+---
+
+### 6. Отправка события отмены бронирования (BookingCancelled)
+
+Команда:
+
+```bash
+docker compose run --rm \
+-e EVENT_TYPE=BookingCancelled \
+-e BOOKING_ID=501 \
+-e USER_ID=101 \
+event-producer
+```
+
+Результат:
+
+```text
+Published BookingCancelled with routing_key=booking.cancelled
+
+{
+  "eventId": "evt-8e31cb75-2d3a-4b4d-b73c-1e6e2c7d9811",
+  "eventType": "BookingCancelled",
+  "eventVersion": 1,
+  "occurredAt": "2026-05-24T12:05:00Z",
+  "producer": "hotel-booking-event-producer",
+  "correlationId": "req-4a7d0e21",
+  "payload": {
+    "bookingId": 501,
+    "userId": 101,
+    "status": "cancelled"
+  }
+}
+```
+
+---
+
+### 7. Проверка обработки отмены бронирования
+
+Команда:
+
+```bash
+docker compose logs -f event-consumer
+```
+
+Результат:
+
+```text
+hotel-booking-event-consumer  | Received BookingCancelled event_id=evt-8e31cb75-2d3a-4b4d-b73c-1e6e2c7d9811
+
+hotel-booking-event-consumer  | Notification prepared: booking 501 cancelled for user 101
+```
+
+---
